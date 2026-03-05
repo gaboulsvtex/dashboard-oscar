@@ -124,6 +124,26 @@ def main():
             use_container_width=True
         )
 
+    st.divider()
+    # --- NOVA SEÇÃO: REINCIDÊNCIA POR PEDIDO ---
+    st.subheader("📦 Chamados por Pedido (Reincidência)")
+    st.markdown("Identificação de múltiplos tickets abertos para o mesmo número de pedido (16 primeiros caracteres do protocolo).")
+
+    if not metrics["order_reincidence"].empty:
+        st.dataframe(
+            metrics["order_reincidence"],
+            column_config={
+                "ID do Pedido": st.column_config.TextColumn("Número do Pedido"),
+                "Tickets Relacionados": st.column_config.ListColumn("Protocolos Identificados"),
+                "Setores": st.column_config.ListColumn("Setores Envolvidos"),
+                "Qtd Tickets": st.column_config.NumberColumn("Qtd. Atendimentos", format="%d 🎫")
+            },
+            hide_index=True,
+            use_container_width=True
+        )
+    else:
+        st.info("Nenhum pedido com múltiplos tickets foi detectado no período selecionado.")
+
     with st.expander("🔍 Ver Base de Dados Completa"):
         available_cols = ['created_on', 'urn', 'sector_name', 'protocol', 'tag_list', 'interaction_time']
         display_cols = [c for c in available_cols if c in df_filtered.columns]
