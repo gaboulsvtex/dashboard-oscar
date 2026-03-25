@@ -78,3 +78,26 @@ class WeniChatsEngineClient:
             df['sector_name'] = ''
 
         return df
+
+class WeniSupervisorClient:
+    def __init__(self, project_uuid: str, api_key: str):
+        self.project_uuid = project_uuid
+        self.base_url = f"https://nexus.weni.ai/api/public/{project_uuid}/supervisor/conversations"
+        self.headers = {"Authorization": f"ApiKey {api_key.strip()}", "Accept": "application/json"}
+
+    @st.cache_data(ttl=600)
+    def fetch_ai_conversations(_self, start_date, end_date):
+        params = {
+            "start": start_date.strftime("%Y-%m-%d"),
+            "end": end_date.strftime("%Y-%m-%d"),
+            "page_size": 50
+        }
+        all_results = []
+        # Para simplificação, pegamos a primeira página e o resumo de status
+        try:
+            response = requests.get(_self.base_url, headers=_self.headers, params=params, timeout=30)
+            response.raise_for_status()
+            return response.json() # Retorna o dicionário completo com status_summary e results
+        except Exception as e:
+            st.error(f"Erro IA ({_self.project_uuid}): {e}")
+            return None
