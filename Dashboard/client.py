@@ -82,22 +82,53 @@ class WeniChatsEngineClient:
 class WeniSupervisorClient:
     def __init__(self, project_uuid: str, api_key: str):
         self.project_uuid = project_uuid
-        self.base_url = f"https://nexus.weni.ai/api/public/{project_uuid}/supervisor/conversations"
-        self.headers = {"Authorization": f"ApiKey {api_key.strip()}", "Accept": "application/json"}
+        self.api_key = api_key
 
-    @st.cache_data(ttl=600)
-    def fetch_ai_conversations(_self, start_date, end_date):
-        params = {
-            "start": start_date.strftime("%Y-%m-%d"),
-            "end": end_date.strftime("%Y-%m-%d"),
-            "page_size": 50
-        }
-        all_results = []
-        # Para simplificação, pegamos a primeira página e o resumo de status
-        try:
-            response = requests.get(_self.base_url, headers=_self.headers, params=params, timeout=30)
+    def fetch_ai_conversations(self, start_date, end_date):
+        # Chama a função cacheadada passando as credenciais explicitamente
+        return fetch_cached_ai_conversations(self.project_uuid, self.api_key, start_date, end_date)
+
+# A função de cache fora da classe, obrigando o Streamlit 
+# a criar um cache separado para CADA project_uuid e data.
+@st.cache_data(ttl=600)
+def fetch_cached_ai_conversations(project_uuid, api_key, start_date, end_date):
+    base_url = f"https://nexus.weni.ai/api/public/{project_uuid}/supervisor/conversations"
+    headers = {"Authorization": f"ApiKey {api_key.strip()}", "Accept": "application/json"}
+    
+    all_results = []
+    total_status_summary = {}
+    current_page = 1
+    
+    try:
+        while True:
+            params = {
+                "start": start_date.strftime("%Y-%m-%d"),
+                "end": end_date.strftime("%Y-%m-%d"),
+                "page": current_page,
+                "page_size": 100
+            }
+            
+            response = requests.get(base_url, headers=headers, params=params, timeout=30)
             response.raise_for_status()
-            return response.json() # Retorna o dicionário completo com status_summary e results
-        except Exception as e:
-            st.error(f"Erro IA ({_self.project_uuid}): {e}")
-            return None
+            data = response.json()
+            
+            results = data.get("results", [])
+            all_results.extend(results)
+            
+            if current_page == 1:
+                total_status_summary = data.get("status_summary", {})
+            
+            # Se atingiu o limite ou a página veio vazia, interrompe a paginação
+            if len(all_results) >= data.get("count", 0) or not results:
+                break
+                
+            current_page += 1
+
+        return {
+            "status_summary": total_status_summary,
+            "results": all_results,
+            "count": data.get("count", 0)
+        }
+    except Exception as e:
+        st.error(f"Erro IA ({project_uuid}) na página {current_page}: {e}")
+        return None

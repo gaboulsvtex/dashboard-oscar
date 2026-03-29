@@ -184,14 +184,13 @@ def render_sac_page(token, dates, selected_projects):
 def render_ai_page(all_tokens, dates, selected_projects):
     st.title("🤖 Métricas de IA - Consolidado")
     
-    # Variáveis para acumular o total
-    total_consolidado = 0
+    total_conversas = 0
     ai_assisted_total = 0
     not_assisted_total = 0
     transferred_total = 0
-    all_results = []
+    dfs_projetos = [] # Lista limpa para acumular DataFrames
 
-    # Loop para chamar a API de cada projeto selecionado
+    # Loop para buscar dados de cada projeto
     for p_name in selected_projects:
         config = PROJECT_CONFIGS[p_name]
         token_projeto = all_tokens[config["token_idx"]]
@@ -200,41 +199,84 @@ def render_ai_page(all_tokens, dates, selected_projects):
         client = WeniSupervisorClient(uuid_projeto, token_projeto)
         data = client.fetch_ai_conversations(dates[0], dates[1])
         
-        if data and "status_summary" in data:
-            summary = data["status_summary"]
-            total_consolidado += data.get("count", 0)
-            ai_assisted_total += summary.get("0", 0) # AI-Assisted
-            not_assisted_total += summary.get("1", 0) # Not Assisted
-            transferred_total += summary.get("4", 0)  # Transferred
+        if data:
+            summary = data.get("status_summary", {})
+            total_conversas += data.get("count", 0)
+            ai_assisted_total += summary.get("0", 0)
+            not_assisted_total += summary.get("1", 0)
+            transferred_total += summary.get("4", 0)
             
             if data.get("results"):
-                # Adiciona o nome do projeto para saber de onde veio a conversa
-                for res in data["results"]:
-                    res["projeto_origem"] = p_name
-                all_results.extend(data["results"])
+                # Transforma direto em DF para evitar mutação do dicionário cacheado
+                df_temp = pd.DataFrame(data["results"])
+                df_temp["projeto_origem"] = p_name
+                dfs_projetos.append(df_temp)
 
-    # Exibição dos KPIs Consolidados
-    st.subheader(f"Performance: {', '.join(selected_projects)}")
-    c1, c2, c3, c4 = st.columns(4)
+    # --- CÁLCULO DAS MÉTRICAS DE CONTATO ---
+    if dfs_projetos:
+        # Junta os DataFrames de todos os projetos de forma segura
+        df_ai = pd.concat(dfs_projetos, ignore_index=True)
+        
+        # Filtra os contatos vazios ou nulos (Para a IA não contabilizar ausência de número como reincidência)
+        df_valid_urns = df_ai.dropna(subset=['contact_urn'])
+        df_valid_urns = df_valid_urns[df_valid_urns['contact_urn'].astype(str).str.strip() != ""]
+        
+        # Cálculos de contatos
+        contatos_unicos = df_valid_urns['contact_urn'].nunique()
+        urn_counts = df_valid_urns['contact_urn'].value_counts()
+        contatos_recorrentes = len(urn_counts[urn_counts > 1])
+    else:
+        contatos_unicos = 0
+        contatos_recorrentes = 0
+        df_ai = pd.DataFrame()
+
+    # --- EXIBIÇÃO DOS KPIS ---
+    st.subheader(f"Performance Consolidada: {', '.join(selected_projects)}")
     
-    c1.metric("Total de Conversas", total_consolidado)
-    c2.metric("Atendidas pela IA", ai_assisted_total)
-    c3.metric("Não Atendidas", not_assisted_total)
-    c4.metric("Transferidas (Humano)", transferred_total)
+    # Cálculos de Porcentagem
+    pct_atendidas_ia = (ai_assisted_total / total_conversas * 100) if total_conversas > 0 else 0.0
+    pct_nao_atendidas = (not_assisted_total / total_conversas * 100) if total_conversas > 0 else 0.0
+    pct_transferidas = (transferred_total / total_conversas * 100) if total_conversas > 0 else 0.0
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total de Conversas", total_conversas)
+    c2.metric(
+        "Atendidas pela IA", 
+        f"{pct_atendidas_ia:.1f}%", 
+        delta=f"{ai_assisted_total} conversas", 
+        delta_color="off"
+    )
+    c3.metric(
+        "Não Atendidas pela IA", 
+        f"{pct_nao_atendidas:.1f}%", 
+        delta=f"{not_assisted_total} conversas", 
+        delta_color="off"
+    )
+    c4.metric(
+        "Transferidas (Humano)", 
+        f"{pct_transferidas:.1f}%", 
+        delta=f"{transferred_total} conversas", 
+        delta_color="off"
+    )
+
+    st.write("---")
+    m1, m2 = st.columns(2)
+    m1.metric("Total de Contatos Únicos", contatos_unicos, 
+              help="Quantidade de clientes diferentes (URNs únicos) que interagiram.")
+    m2.metric("Contatos Recorrentes", contatos_recorrentes, 
+              help="Clientes que conversaram com a IA mais de uma vez no conjunto selecionado.")
 
     st.divider()
     
-    if all_results:
-        st.subheader("💬 Detalhamento de Conversas (Multiprojeto)")
-        df_ai = pd.DataFrame(all_results)
-        # Ordenar por data decrescente
+    if not df_ai.empty:
+        st.subheader("💬 Detalhamento das Conversas")
         df_ai['created_at'] = pd.to_datetime(df_ai['created_at'])
         df_ai = df_ai.sort_values(by='created_at', ascending=False)
         
         cols = ['projeto_origem', 'created_at', 'status', 'contact_urn', 'topic']
         st.dataframe(df_ai[cols], use_container_width=True)
     else:
-        st.info("Nenhuma conversa encontrada para os projetos selecionados.") 
+        st.info("Nenhuma conversa encontrada para os filtros aplicados.")
 
 if __name__ == "__main__":
     main()
