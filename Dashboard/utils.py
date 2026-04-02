@@ -76,3 +76,48 @@ def calculate_sac_metrics(df: pd.DataFrame):
         "reincidence_table": tag_reincidence,
         "order_reincidence": order_reincidence
     }
+
+def calculate_csat_metrics(evaluations_list):
+    # Dicionário de mapeamento das notas
+    csat_map = {
+        5: "🤩 Muito satisfeito",
+        4: "😁 Satisfeito",
+        3: "😐 Neutro",
+        2: "☹️ Insatisfeito",
+        1: "😡 Muito insatisfeito"
+    }
+
+    if not evaluations_list:
+        empty_dist = pd.DataFrame([
+            {"Nota": k, "Categoria": v, "Quantidade": 0, "Proporção": 0.0, "Texto": "0.0% (0)"}
+            for k, v in csat_map.items()
+        ])
+        return {"avg": 0.0, "count": 0, "dist": empty_dist.sort_values('Nota', ascending=True)}
+    
+    df = pd.DataFrame(evaluations_list, columns=['nota'])
+    avg = df['nota'].mean()
+    total = len(df)
+    counts = df['nota'].value_counts().to_dict()
+
+    dist_data = []
+    for nota, categoria in csat_map.items():
+        qtd = counts.get(nota, 0)
+        prop = (qtd / total * 100) if total > 0 else 0
+        dist_data.append({
+            "Nota": nota,
+            "Categoria": categoria,
+            "Quantidade": qtd,
+            "Proporção": prop,
+            "Texto": f"{prop:.1f}% ({qtd})" # Formato visual do rótulo
+        })
+        
+    dist = pd.DataFrame(dist_data)
+    
+    # Ordena crescente (1 a 5) para que no gráfico Plotly a nota 5 fique no topo
+    dist = dist.sort_values('Nota', ascending=True)
+    
+    return {
+        "avg": round(avg, 2),
+        "count": len(df),
+        "dist": dist
+    }

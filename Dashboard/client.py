@@ -132,3 +132,58 @@ def fetch_cached_ai_conversations(project_uuid, api_key, start_date, end_date):
     except Exception as e:
         st.error(f"Erro IA ({project_uuid}) na página {current_page}: {e}")
         return None
+
+class WeniFlowsClient:
+    def __init__(self, token: str, flow_uuid: str):
+        self.token = token
+        self.flow_uuid = flow_uuid
+
+    def fetch_csat_data(self, start_date, end_date):
+        # Chama a função cacheadada passando credenciais e o ID do fluxo explicitamente
+        return fetch_cached_csat_data(self.token, self.flow_uuid, start_date, end_date)
+
+
+@st.cache_data(ttl=600, show_spinner="Buscando avaliações CSAT...")
+def fetch_cached_csat_data(token, flow_uuid, start_date, end_date):
+    headers = {
+        "Authorization": f"Token {token.strip()}",
+        "Accept": "application/json"
+    }
+    base_url = "https://flows.weni.ai/api/v2/runs.json"
+    all_evaluations = []
+    
+    # Inclusão do parâmetro 'flow' conforme a documentação da API
+    params = {
+        "flow": flow_uuid,
+        "after": start_date.strftime("%Y-%m-%d"),
+        "before": end_date.strftime("%Y-%m-%d"),
+        "responded": "true"
+    }
+    
+    next_url = base_url
+    try:
+        while next_url:
+            # Se for a próxima página (next_url), os params já vêm embutidos na URL retornada pela API
+            response = requests.get(
+                next_url, 
+                headers=headers, 
+                params=params if next_url == base_url else None, 
+                timeout=30
+            )
+            response.raise_for_status()
+            data = response.json()
+            
+            for run in data.get("results", []):
+                values = run.get("values", {})
+                if "avaliacao" in values:
+                    val = values["avaliacao"].get("value")
+                    # Filtra apenas avaliações válidas (1 a 5)
+                    if val in ["1", "2", "3", "4", "5"]:
+                        all_evaluations.append(int(val))
+            
+            next_url = data.get("next")
+            
+        return all_evaluations
+    except Exception as e:
+        st.error(f"Erro ao buscar CSAT (Flow {flow_uuid}): {e}")
+        return []

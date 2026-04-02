@@ -2,8 +2,8 @@ import streamlit as st
 import datetime
 import pandas as pd
 import plotly.express as px
-from client import WeniChatsEngineClient, WeniSupervisorClient
-from utils import calculate_sac_metrics
+from client import WeniChatsEngineClient, WeniSupervisorClient, WeniFlowsClient
+from utils import calculate_sac_metrics, calculate_csat_metrics
 
 # --- CONFIGURAÇÃO VISUAL ---
 st.set_page_config(page_title="Oscar Calçados | Analytics", layout="wide")
@@ -49,9 +49,9 @@ def main():
         st.divider()
         st.header("⚙️ Configurações")
         raw_tokens = st.text_input(
-            "Tokens (t1 / t2 / t3 / t4)",
+            "Tokens (t1 a t7)",
             type="password",
-            help="Insira os 4 tokens separados por barra"
+            help="Formato: t1 / t2 / t3 / t4 / t5 / t6 / t7"
         )
         
         range_date = st.date_input(
@@ -69,8 +69,8 @@ def main():
     
     # Validação de Tokens
     tokens = [t.strip() for t in raw_tokens.split("/")] if raw_tokens else []
-    if len(tokens) < 4:
-        st.info("Por favor, insira os 4 tokens no formato: token1 / token2 / token3 / token4")
+    if len(tokens) < 7:
+        st.info("Por favor, insira os 7 tokens no formato: token1 / token2 / token3 / token4 / token5 / token6 / token7")
         return
 
     if not projetos_selecionados:
@@ -79,7 +79,7 @@ def main():
 
     if page == "Atendimento Humano (SAC)":
         render_sac_page(
-            tokens[0],
+            tokens,
             range_date,
             projetos_selecionados
         )
@@ -90,10 +90,12 @@ def main():
             projetos_selecionados
         )
 
-def render_sac_page(token, dates, selected_projects): 
+def render_sac_page(all_tokens, dates, selected_projects): 
     st.title("📊 Dashboard SAC - Atendimento Humano")
-    client = WeniChatsEngineClient(token)
-    df_raw = client.fetch_metrics(dates[0], dates[1])
+
+    # --- CHATS ENGINE ---
+    client_chats_engine = WeniChatsEngineClient(all_tokens[0])
+    df_raw = client_chats_engine.fetch_metrics(dates[0], dates[1])
 
     if df_raw.empty:
         st.warning("Nenhum dado encontrado para o período selecionado.")
@@ -106,25 +108,56 @@ def render_sac_page(token, dates, selected_projects):
 
     metrics = calculate_sac_metrics(df_filtered)
 
+    # --- FLOWS ---
+    consolidated_csat = []
+    csat_config_map = {
+        "Oscar Calçados": {
+            "token": all_tokens[4],
+            "flow_uuid": "ed542aa7-003d-4f64-b95d-8b236a1c094b"
+        },
+        "Paquetá Esportes": {
+            "token": all_tokens[5],
+            "flow_uuid": "26f21437-8f7c-4767-a6a6-fb22ac6ac065"
+        },
+        "Paquetá Calçados": {
+            "token": all_tokens[6],
+            "flow_uuid": "f7b5e140-4e65-44d2-9e7d-cb4497e1c478"
+        }
+    }
+
+    for p_name in selected_projects:
+        config = csat_config_map.get(p_name)
+        if config and config["token"]:
+            flow_client = WeniFlowsClient(config["token"], config["flow_uuid"])
+            consolidated_csat.extend(flow_client.fetch_csat_data(dates[0], dates[1]))
+
+    csat_metrics = calculate_csat_metrics(consolidated_csat)
+
+    setores = [PROJECT_CONFIGS[p]["sac_sector"] for p in selected_projects]
+    df_filtered = df_raw[df_raw['sector.name'].str.contains('|'.join(setores), case=False, na=False)]
+    sac_metrics = calculate_sac_metrics(df_filtered)
+
     # KPIs Principais
     st.subheader("🚀 Indicadores de Performance")
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+    kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
     
     # Métrica alterada conforme solicitado
-    kpi1.metric("Total de Atendimentos ENCERRADOS", metrics["total_calls"])
+    kpi1.metric("Total de Atendimentos ENCERRADOS", sac_metrics["total_calls"])
     
     # Clientes que só chamaram uma vez (FCR em valor absoluto)
-    kpi2.metric("Atendimentos Únicos", metrics["single_contact"], help="Clientes que entraram em contato apenas uma vez.")
+    kpi2.metric("Atendimentos Únicos", sac_metrics["single_contact"], help="Clientes que entraram em contato apenas uma vez.")
     
     # Clientes que geraram mais de um chamado
-    kpi3.metric("Clientes Reincidentes", metrics["recurrent_clients"], delta_color="inverse", help="Quantidade de URNs distintos que possuem 2 ou mais chamados no período.")
+    kpi3.metric("Clientes Reincidentes", sac_metrics["recurrent_clients"], delta_color="inverse", help="Quantidade de URNs distintos que possuem 2 ou mais chamados no período.")
     
     # Métrica de FCR (Porcentagem de chamados não reincidentes sobre o total)
     kpi4.metric(
         label="Taxa de FCR", 
-        value=f"{metrics['fcr_rate']}%",
+        value=f"{sac_metrics['fcr_rate']}%",
         help="Razão entre chamados de contatos únicos e o total de atendimentos abertos no período."
     )
+
+    kpi5.metric("Média CSAT", f"{csat_metrics['avg']} ⭐", help=f"Baseado em {csat_metrics['count']} avaliações")
 
     st.divider()
 
@@ -141,6 +174,42 @@ def render_sac_page(token, dates, selected_projects):
                          color_continuous_scale='Reds', template='plotly_white')
             fig.update_layout(yaxis={'categoryorder':'total ascending'}, showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
+
+        st.write("---")
+
+        st.subheader("⭐ Distribuição CSAT")
+        if csat_metrics["count"] > 0:
+            # Criação do gráfico de barras horizontais
+            fig_csat = px.bar(
+                csat_metrics["dist"], 
+                x='Proporção', 
+                y='Categoria', 
+                orientation='h',
+                text='Texto', # O texto criado no utils.py (Ex: 80.0% (4))
+                color='Nota',
+                color_continuous_scale="RdYlGn", # Escala de cor: Vermelho (1) ao Verde (5)
+                range_color=[1, 5] # Fixa os extremos das cores
+            )
+            
+            # Ajustes visuais de layout do gráfico
+            fig_csat.update_layout(
+                xaxis_title="Proporção das Avaliações (%)",
+                yaxis_title="",
+                showlegend=False,
+                height=350,
+                xaxis=dict(range=[0, 115]) # Dá margem extra na direita para caber o texto longo
+            )
+            
+            # Posiciona o texto ao lado direito (fora) de cada barra
+            fig_csat.update_traces(
+                textposition='outside',
+                textfont_size=14,
+                cliponaxis=False # Evita que textos muito longos sejam cortados na borda
+            )
+            
+            st.plotly_chart(fig_csat, use_container_width=True)
+        else:
+            st.info("Nenhuma avaliação CSAT encontrada no período filtrado.")
 
     with col_right:
         st.subheader("🔄 Reincidência por Assunto")
