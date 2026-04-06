@@ -1,0 +1,6 @@
+# Ignorar configurações e segredos do Streamlit
+.streamlit/
+
+# Ignorar caches do Python
+__pycache__/
+*.pyc

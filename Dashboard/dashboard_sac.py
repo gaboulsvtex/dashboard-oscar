@@ -20,17 +20,23 @@ PROJECT_CONFIGS = {
     "Oscar Calçados": {
         "sac_sector": "Oscar Calçados",
         "project_uuid": "9a69cb5f-af0e-4a59-b53c-66c814d56fe7",
-        "token_idx": 1
+        "conv_key": st.secrets["OSCAR_CALCADOS"]["CONVERSATIONS_KEY"],
+        "flows_token": st.secrets["OSCAR_CALCADOS"]["FLOWS_TOKEN"],
+        "flow_uuid": "ed542aa7-003d-4f64-b95d-8b236a1c094b"
     },
     "Paquetá Esportes": {
         "sac_sector": "Paquetá Esportes",
         "project_uuid": "95c89c57-7591-46bc-9845-add5f98e5488",
-        "token_idx": 2
+        "conv_key": st.secrets["PAQUETA_ESPORTES"]["CONVERSATIONS_KEY"],
+        "flows_token": st.secrets["PAQUETA_ESPORTES"]["FLOWS_TOKEN"],
+        "flow_uuid": "26f21437-8f7c-4767-a6a6-fb22ac6ac065"
     },
     "Paquetá Calçados": {
         "sac_sector": "paquetá",
         "project_uuid": "953c5de8-3055-411a-ab7d-5f41906bfe2b",
-        "token_idx": 3
+        "conv_key": st.secrets["PAQUETA_CALCADOS"]["CONVERSATIONS_KEY"],
+        "flows_token": st.secrets["PAQUETA_CALCADOS"]["FLOWS_TOKEN"],
+        "flow_uuid": "f7b5e140-4e65-44d2-9e7d-cb4497e1c478"
     }
 }
 
@@ -39,7 +45,8 @@ def main():
     # --- SIDEBAR COMUM ---
     with st.sidebar:
         st.image("https://media.licdn.com/dms/image/v2/C4D0BAQHZLjg07E3QIQ/company-logo_200_200/company-logo_200_200/0/1630575950724/grupo_oscar_cal_ados_logo?e=2147483647&v=beta&t=8RZBpOizPkdB8fBgMzMI-MPcw0DM7wZDxx8YBrukfFY", width=150)
-        
+        st.write(f"👤 **Usuário:** {st.user.email}")
+
         st.header("📂 Navegação")
         page = st.radio(
             "Selecione a Visualização",
@@ -47,12 +54,6 @@ def main():
         )
         
         st.divider()
-        st.header("⚙️ Configurações")
-        raw_tokens = st.text_input(
-            "Tokens (t1 a t7)",
-            type="password",
-            help="Formato: t1 / t2 / t3 / t4 / t5 / t6 / t7"
-        )
         
         range_date = st.date_input(
             "Período de Análise",
@@ -66,12 +67,6 @@ def main():
             help="Selecione um ou mais projetos para ver os dados.",
             default=list(PROJECT_CONFIGS.keys())
         )
-    
-    # Validação de Tokens
-    tokens = [t.strip() for t in raw_tokens.split("/")] if raw_tokens else []
-    if len(tokens) < 7:
-        st.info("Por favor, insira os 7 tokens no formato: token1 / token2 / token3 / token4 / token5 / token6 / token7")
-        return
 
     if not projetos_selecionados:
         st.warning("Selecione pelo menos um projeto no menu lateral.")
@@ -79,22 +74,20 @@ def main():
 
     if page == "Atendimento Humano (SAC)":
         render_sac_page(
-            tokens,
             range_date,
             projetos_selecionados
         )
     else:
         render_ai_page(
-            tokens,
             range_date,
             projetos_selecionados
         )
 
-def render_sac_page(all_tokens, dates, selected_projects): 
+def render_sac_page(dates, selected_projects): 
     st.title("📊 Dashboard SAC - Atendimento Humano")
 
     # --- CHATS ENGINE ---
-    client_chats_engine = WeniChatsEngineClient(all_tokens[0])
+    client_chats_engine = WeniChatsEngineClient(st.secrets["TOKENS"]["CHATS_ENGINE_TOKEN"])
     df_raw = client_chats_engine.fetch_metrics(dates[0], dates[1])
 
     if df_raw.empty:
@@ -110,29 +103,13 @@ def render_sac_page(all_tokens, dates, selected_projects):
 
     # --- FLOWS ---
     consolidated_csat = []
-    csat_config_map = {
-        "Oscar Calçados": {
-            "token": all_tokens[4],
-            "flow_uuid": "ed542aa7-003d-4f64-b95d-8b236a1c094b"
-        },
-        "Paquetá Esportes": {
-            "token": all_tokens[5],
-            "flow_uuid": "26f21437-8f7c-4767-a6a6-fb22ac6ac065"
-        },
-        "Paquetá Calçados": {
-            "token": all_tokens[6],
-            "flow_uuid": "f7b5e140-4e65-44d2-9e7d-cb4497e1c478"
-        }
-    }
 
     for p_name in selected_projects:
-        config = csat_config_map.get(p_name)
-        if config and config["token"]:
-            flow_client = WeniFlowsClient(config["token"], config["flow_uuid"])
-            consolidated_csat.extend(flow_client.fetch_csat_data(dates[0], dates[1]))
+        config = PROJECT_CONFIGS[p_name]
+        flow_client = WeniFlowsClient(config["flows_token"], config["flow_uuid"])
+        consolidated_csat.extend(flow_client.fetch_csat_data(dates[0], dates[1]))
 
     csat_metrics = calculate_csat_metrics(consolidated_csat)
-
     setores = [PROJECT_CONFIGS[p]["sac_sector"] for p in selected_projects]
     df_filtered = df_raw[df_raw['sector.name'].str.contains('|'.join(setores), case=False, na=False)]
     sac_metrics = calculate_sac_metrics(df_filtered)
@@ -250,7 +227,7 @@ def render_sac_page(all_tokens, dates, selected_projects):
         display_cols = [c for c in available_cols if c in df_filtered.columns]
         st.dataframe(df_filtered[display_cols], use_container_width=True)
 
-def render_ai_page(all_tokens, dates, selected_projects):
+def render_ai_page(dates, selected_projects):
     st.title("🤖 Métricas de IA - Consolidado")
     
     total_conversas = 0
@@ -262,7 +239,7 @@ def render_ai_page(all_tokens, dates, selected_projects):
     # Loop para buscar dados de cada projeto
     for p_name in selected_projects:
         config = PROJECT_CONFIGS[p_name]
-        token_projeto = all_tokens[config["token_idx"]]
+        token_projeto = config["conv_key"]
         uuid_projeto = config["project_uuid"]
         
         client = WeniSupervisorClient(uuid_projeto, token_projeto)
