@@ -45,7 +45,6 @@ def main():
     # --- SIDEBAR COMUM ---
     with st.sidebar:
         st.image("https://media.licdn.com/dms/image/v2/C4D0BAQHZLjg07E3QIQ/company-logo_200_200/company-logo_200_200/0/1630575950724/grupo_oscar_cal_ados_logo?e=2147483647&v=beta&t=8RZBpOizPkdB8fBgMzMI-MPcw0DM7wZDxx8YBrukfFY", width=150)
-        st.write(f"👤 **Usuário:** {st.user.email}")
 
         st.header("📂 Navegação")
         page = st.radio(
