@@ -309,7 +309,42 @@ def render_ai_page(dates, selected_projects):
     m1.metric("Total de Contatos Únicos", contatos_unicos, 
               help="Quantidade de clientes diferentes (URNs únicos) que interagiram.")
     m2.metric("Contatos Recorrentes", contatos_recorrentes, 
-              help="Clientes que conversaram com a IA mais de uma vez no conjunto selecionado.")
+              help="Clientes que conversaram com a IA mais de uma vez no período selecionado.")
+
+    st.divider()
+    
+    if not df_ai.empty:
+        # --- GRÁFICO: ASSUNTOS MAIS COMUNS (TOPICS) ---
+        st.subheader("🚩 Assuntos mais comuns")
+        
+        # Filtrar valores nulos ou vazios na coluna topic
+        if 'topic' in df_ai.columns:
+            df_topics = df_ai.dropna(subset=['topic']).copy()
+            df_topics = df_topics[df_topics['topic'].astype(str).str.strip() != ""]
+            
+            if not df_topics.empty:
+                # Contagem de frequência dos assuntos
+                top_topics = df_topics['topic'].value_counts().reset_index()
+                top_topics.columns = ['Assunto', 'Frequência']
+                
+                # Gráfico de barras horizontais do Plotly
+                fig_topics = px.bar(
+                    top_topics.head(10), # Pega os 10 assuntos mais frequentes
+                    x='Frequência', 
+                    y='Assunto', 
+                    orientation='h', 
+                    color='Frequência',
+                    color_continuous_scale='Blues', # Utilizando azul para diferenciar do vermelho do SAC
+                    template='plotly_white'
+                )
+                fig_topics.update_layout(
+                    yaxis={'categoryorder':'total ascending'}, 
+                    showlegend=False,
+                    height=350
+                )
+                st.plotly_chart(fig_topics, use_container_width=True)
+            else:
+                st.info("Nenhum assunto (topic) foi classificado nas conversas filtradas.")
 
     st.divider()
     
