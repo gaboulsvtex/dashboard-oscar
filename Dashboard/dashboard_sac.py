@@ -139,6 +139,31 @@ def render_sac_page(dates, selected_projects):
 
     kpi5.metric("Média CSAT", f"{csat_metrics['avg']} ⭐", help=f"Baseado em {csat_metrics['count']} avaliações")
 
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.subheader("⏱️ Tempos Médios de Atendimento")
+    
+    t1, t2, t3, t4 = st.columns(4)
+    t1.metric(
+        "Tempo Médio em Espera", 
+        sac_metrics["avg_waiting_time"], 
+        help="Média do tempo que o contato aguardou até ser atribuído a um atendente humano."
+    )
+    t2.metric(
+        "Tempo p/ 1ª Resposta", 
+        sac_metrics["avg_first_response_time"], 
+        help="Média do tempo até a primeira interação do agente humano."
+    )
+    t3.metric(
+        "Tempo Médio de Resposta", 
+        sac_metrics["avg_message_response_time"], 
+        help="Média de tempo geral entre uma mensagem do cliente e a resposta do agente."
+    )
+    t4.metric(
+        "Duração da Conversa", 
+        sac_metrics["avg_interaction_time"], 
+        help="Tempo total médio de duração da sala desde a abertura até o encerramento."
+    )
+
     st.divider()
 
     col_left, col_right = st.columns([1, 1])

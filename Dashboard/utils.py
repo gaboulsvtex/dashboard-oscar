@@ -15,6 +15,22 @@ def extract_order_id(protocol):
         return protocol[:16]
     return None
 
+def format_seconds(seconds):
+    """
+    Formata um valor em segundos para um texto legível de horas, minutos e segundos.
+    """
+    if pd.isna(seconds) or seconds <= 0:
+        return "0m 0s"
+    
+    seconds = int(seconds)
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    s = seconds % 60
+    
+    if h > 0:
+        return f"{h}h {m}m {s}s"
+    return f"{m}m {s}s"
+
 def calculate_sac_metrics(df: pd.DataFrame):
     """Calcula estatísticas de chamados, reincidência, FCR e Pedidos."""
     if df.empty:
@@ -24,7 +40,12 @@ def calculate_sac_metrics(df: pd.DataFrame):
             "recurrent_clients": 0,
             "fcr_rate": 0.0,
             "top_tags": pd.DataFrame(),
-            "reincidence_table": pd.DataFrame()
+            "reincidence_table": pd.DataFrame(),
+            "order_reincidence": pd.DataFrame(),
+            "avg_waiting_time": "0m 0s",
+            "avg_first_response_time": "0m 0s",
+            "avg_message_response_time": "0m 0s",
+            "avg_interaction_time": "0m 0s"
         }
 
     # Total de chamados (cada linha na API v2 é um atendimento humano)
@@ -67,6 +88,25 @@ def calculate_sac_metrics(df: pd.DataFrame):
     # 4. Filtrar apenas pedidos com MAIS de um ticket (reincidência)
     order_reincidence = order_reincidence[order_reincidence['Qtd Tickets'] > 1].sort_values(by='Qtd Tickets', ascending=False)
 
+    # --- CÁLCULO DE TEMPOS MÉDIOS ---
+    time_columns = ['waiting_time', 'first_response_time', 'message_response_time', 'interaction_time']
+    time_metrics = {}
+    
+    for col in time_columns:
+        # Garante que a coluna exista e converte valores falhos em NaN temporariamente
+        if col in df.columns:
+            # Substitui NaNs e valores negativos por 0 para uma média segura
+            numeric_series = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            avg_val = numeric_series[numeric_series > 0].mean() # Tira média só de maiores que 0 para não distorcer o dado global
+            
+            # Se for NaN (caso não tenha nenhum dado válido), resgata como 0
+            if pd.isna(avg_val):
+                avg_val = 0
+                
+            time_metrics[f"avg_{col}"] = format_seconds(avg_val)
+        else:
+            time_metrics[f"avg_{col}"] = "0m 0s"
+
     return {
         "total_calls": total_calls,
         "single_contact": single_contacts,
@@ -74,7 +114,11 @@ def calculate_sac_metrics(df: pd.DataFrame):
         "fcr_rate": round(fcr_rate, 2),
         "top_tags": tags_df['tag_list'].value_counts().reset_index(name='Frequência'),
         "reincidence_table": tag_reincidence,
-        "order_reincidence": order_reincidence
+        "order_reincidence": order_reincidence,
+        "avg_waiting_time": time_metrics["avg_waiting_time"],
+        "avg_first_response_time": time_metrics["avg_first_response_time"],
+        "avg_message_response_time": time_metrics["avg_message_response_time"],
+        "avg_interaction_time": time_metrics["avg_interaction_time"]
     }
 
 def calculate_csat_metrics(evaluations_list):
@@ -121,3 +165,4 @@ def calculate_csat_metrics(evaluations_list):
         "count": len(df),
         "dist": dist
     }
+
