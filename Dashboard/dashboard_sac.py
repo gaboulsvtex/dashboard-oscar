@@ -2,7 +2,11 @@ import streamlit as st
 import datetime
 import pandas as pd
 import plotly.express as px
-from client import WeniChatsEngineClient, WeniSupervisorClient, WeniFlowsClient
+import concurrent.futures
+import threading
+import time
+from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
+from client import WeniChatsEngineClient, WeniSupervisorClient, WeniFlowsClient, WeniEventsClient
 from utils import calculate_sac_metrics, calculate_csat_metrics
 
 # --- CONFIGURAÇÃO VISUAL ---
@@ -226,36 +230,72 @@ def render_sac_page(dates, selected_projects):
         display_cols = [c for c in available_cols if c in df_filtered.columns]
         st.dataframe(df_filtered[display_cols], use_container_width=True)
 
+def fetch_project_data(p_name, config, dates):
+    # Função auxiliar para buscar dados de um projeto (roda em paralelo)
+    print(f"[{time.strftime('%H:%M:%S')}] 🟢 INICIANDO: {p_name}")
+    token_projeto = config["conv_key"]
+    uuid_projeto = config["project_uuid"]
+    flows_token = config["flows_token"]
+    
+    # 1. Busca conversas
+    client_supervisor = WeniSupervisorClient(uuid_projeto, token_projeto)
+    data = client_supervisor.fetch_ai_conversations(dates[0], dates[1])
+    
+    # 2. Busca eventos de CSAT da IA
+    client_events = WeniEventsClient(flows_token)
+    csat_evals = client_events.fetch_csat_events(dates[0], dates[1])
+    
+    print(f"[{time.strftime('%H:%M:%S')}] 🔴 FINALIZANDO: {p_name}")
+    return p_name, data, csat_evals
+
 def render_ai_page(dates, selected_projects):
-    st.title("🤖 Métricas de IA - Consolidado")
+    st.title("📊 Métricas de IA - Consolidado")
     
     total_conversas = 0
     ai_assisted_total = 0
     not_assisted_total = 0
     transferred_total = 0
     dfs_projetos = [] # Lista limpa para acumular DataFrames
+    ai_csat_evaluations = []
+    futures = {}
+
+    # pegando o contexto atual da sessão do streamlit
+    ctx = get_script_run_ctx()
+
+    def fetch_with_context(p_name, config, dates):
+        add_script_run_ctx(threading.current_thread(), ctx)
+        return fetch_project_data(p_name, config, dates)
 
     # Loop para buscar dados de cada projeto
-    for p_name in selected_projects:
-        config = PROJECT_CONFIGS[p_name]
-        token_projeto = config["conv_key"]
-        uuid_projeto = config["project_uuid"]
-        
-        client = WeniSupervisorClient(uuid_projeto, token_projeto)
-        data = client.fetch_ai_conversations(dates[0], dates[1])
-        
-        if data:
-            summary = data.get("status_summary", {})
-            total_conversas += data.get("count", 0)
-            ai_assisted_total += summary.get("0", 0)
-            not_assisted_total += summary.get("1", 0)
-            transferred_total += summary.get("4", 0)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(selected_projects)) as executor:
+        for p_name in selected_projects:
+            config = PROJECT_CONFIGS[p_name]
+            future = executor.submit(fetch_with_context, p_name, config, dates)
+            futures[future] = p_name
             
-            if data.get("results"):
-                # Transforma direto em DF para evitar mutação do dicionário cacheado
-                df_temp = pd.DataFrame(data["results"])
-                df_temp["projeto_origem"] = p_name
-                dfs_projetos.append(df_temp)
+        for future in concurrent.futures.as_completed(futures):
+            p_name = futures[future]
+            try:
+                _, data, csat_evals = future.result()
+                
+                ai_csat_evaluations.extend(csat_evals)
+                
+                if data:
+                    summary = data.get("status_summary", {})
+                    total_conversas += data.get("count", 0)
+                    ai_assisted_total += summary.get("0", 0)
+                    not_assisted_total += summary.get("1", 0)
+                    transferred_total += summary.get("4", 0)
+                    
+                    if data.get("results"):
+                        df_temp = pd.DataFrame(data["results"])
+                        df_temp["projeto_origem"] = p_name
+                        dfs_projetos.append(df_temp)
+                        
+            except Exception as exc:
+                st.error(f"O projeto {p_name} gerou um erro na busca: {exc}")
+
+    ai_csat_metrics = calculate_csat_metrics(ai_csat_evaluations)
 
     # --- CÁLCULO DAS MÉTRICAS DE CONTATO ---
     if dfs_projetos:
@@ -305,15 +345,28 @@ def render_ai_page(dates, selected_projects):
     )
 
     st.write("---")
-    m1, m2 = st.columns(2)
-    m1.metric("Total de Contatos Únicos", contatos_unicos, 
-              help="Quantidade de clientes diferentes (URNs únicos) que interagiram.")
-    m2.metric("Contatos Recorrentes", contatos_recorrentes, 
-              help="Clientes que conversaram com a IA mais de uma vez no período selecionado.")
+    m1, m2, m3 = st.columns(3)
+    m1.metric(
+        "Total de Contatos Únicos", 
+        contatos_unicos, 
+        help="Quantidade de clientes diferentes (URNs únicos) que interagiram."
+    )
+    m2.metric(
+        "Contatos Recorrentes", 
+        contatos_recorrentes, 
+        help="Clientes que conversaram com a IA mais de uma vez no período selecionado."
+    )
+    m3.metric(
+        "Média CSAT (IA)", 
+        f"{ai_csat_metrics['avg']} ⭐", 
+        help=f"Baseado em {ai_csat_metrics['count']} avaliações."
+    )
 
     st.divider()
     
-    if not df_ai.empty:
+    col_ai_left, col_ai_right = st.columns([1, 1])
+
+    with col_ai_left:
         # --- GRÁFICO: ASSUNTOS MAIS COMUNS (TOPICS) ---
         st.subheader("🚩 Assuntos mais comuns")
         
@@ -345,6 +398,37 @@ def render_ai_page(dates, selected_projects):
                 st.plotly_chart(fig_topics, use_container_width=True)
             else:
                 st.info("Nenhum assunto (topic) foi classificado nas conversas filtradas.")
+    
+    with col_ai_right:
+        st.subheader("⭐ Distribuição CSAT (IA)")
+        if ai_csat_metrics["count"] > 0:
+            fig_csat_ai = px.bar(
+                ai_csat_metrics["dist"], 
+                x='Proporção', 
+                y='Categoria', 
+                orientation='h',
+                text='Texto',
+                color='Nota',
+                color_continuous_scale="RdYlGn",
+                range_color=[1, 5]
+            )
+            
+            fig_csat_ai.update_layout(
+                xaxis_title="Proporção das Avaliações (%)",
+                yaxis_title="",
+                showlegend=False,
+                height=350,
+                xaxis=dict(range=[0, 115])
+            )
+            
+            fig_csat_ai.update_traces(
+                textposition='outside',
+                textfont_size=14,
+                cliponaxis=False
+            )
+            st.plotly_chart(fig_csat_ai, use_container_width=True)
+        else:
+            st.info("Nenhuma avaliação CSAT (IA) encontrada no período.")
 
     st.divider()
     

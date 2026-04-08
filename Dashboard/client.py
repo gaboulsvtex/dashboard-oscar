@@ -187,3 +187,73 @@ def fetch_cached_csat_data(token, flow_uuid, start_date, end_date):
     except Exception as e:
         st.error(f"Erro ao buscar CSAT (Flow {flow_uuid}): {e}")
         return []
+
+
+class WeniEventsClient:
+    def __init__(self, token: str):
+        self.token = token
+
+    def fetch_csat_events(self, start_date, end_date):
+        return fetch_cached_csat_events(self.token, start_date, end_date)
+
+@st.cache_data(ttl=600, show_spinner="Buscando avaliações CSAT da IA...")
+def fetch_cached_csat_events(token, start_date, end_date):
+    headers = {
+        "Authorization": f"Token {token.strip()}",
+        "Content-Type": "application/json"
+    }
+    base_url = "https://flows.weni.ai/api/v2/events.json"
+    all_evaluations = []
+    
+    # Formatação de datas para ISO 8601 (UTC) conforme a documentação
+    date_start_str = start_date.strftime("%Y-%m-%dT00:00:00Z")
+    date_end_str = end_date.strftime("%Y-%m-%dT23:59:59Z")
+    
+    offset = 0
+    limit = 100
+    buscando_dados = True # Variável de controle
+    
+    try:
+        while buscando_dados:
+            params = {
+                "date_start": date_start_str,
+                "date_end": date_end_str,
+                "key": "weni_csat",
+                "limit": limit,
+                "offset": offset
+            }
+            
+            response = requests.get(
+                base_url, 
+                headers=headers, 
+                params=params, 
+                timeout=120
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+        
+            if not data:
+                buscando_dados = False
+                continue
+                
+            # Processamento dos dados da página atual
+            for event in data:
+                val = event.get("value")
+                # Filtra apenas avaliações válidas (1 a 5)
+                if val is not None and str(val) in ["1", "2", "3", "4", "5"]:
+                    all_evaluations.append(int(val))
+            
+            # 2. Contar quantos objetos foram retornados
+            quantidade_retornada = len(data)
+            
+            # 3 e 4. Regra de paginação do Offset
+            if quantidade_retornada < limit:
+                buscando_dados = False 
+            else:
+                offset += limit
+                
+        return all_evaluations
+    except Exception as e:
+        st.error(f"Erro ao buscar eventos CSAT (IA): {e}")
+        return []
