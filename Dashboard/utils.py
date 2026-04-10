@@ -136,12 +136,21 @@ def calculate_csat_metrics(evaluations_list):
             {"Nota": k, "Categoria": v, "Quantidade": 0, "Proporção": 0.0, "Texto": "0.0% (0)"}
             for k, v in csat_map.items()
         ])
-        return {"avg": 0.0, "count": 0, "dist": empty_dist.sort_values('Nota', ascending=True)}
+        return {
+            "avg": 0.0, 
+            "positive_percentage": 0.0,
+            "count": 0, 
+            "dist": empty_dist.sort_values('Nota', ascending=True)
+        }
     
     df = pd.DataFrame(evaluations_list, columns=['nota'])
     avg = df['nota'].mean()
     total = len(df)
     counts = df['nota'].value_counts().to_dict()
+
+    # Cálculo da porcentagem de CSAT Positivo (Notas 4 e 5)
+    positive_count = counts.get(4, 0) + counts.get(5, 0)
+    positive_percentage = (positive_count / total * 100) if total > 0 else 0.0
 
     dist_data = []
     for nota, categoria in csat_map.items():
@@ -152,7 +161,7 @@ def calculate_csat_metrics(evaluations_list):
             "Categoria": categoria,
             "Quantidade": qtd,
             "Proporção": prop,
-            "Texto": f"{prop:.1f}% ({qtd})" # Formato visual do rótulo
+            "Texto": f"{prop:.1f}% ({qtd})"
         })
         
     dist = pd.DataFrame(dist_data)
@@ -162,7 +171,8 @@ def calculate_csat_metrics(evaluations_list):
     
     return {
         "avg": round(avg, 2),
-        "count": len(df),
+        "positive_percentage": round(positive_percentage, 1),
+        "count": total,
         "dist": dist
     }
 

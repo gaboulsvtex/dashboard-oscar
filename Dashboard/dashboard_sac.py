@@ -137,7 +137,11 @@ def render_sac_page(dates, selected_projects):
         help="Razão entre chamados de contatos únicos e o total de atendimentos abertos no período."
     )
 
-    kpi5.metric("Média CSAT", f"{csat_metrics['avg']} ⭐", help=f"Baseado em {csat_metrics['count']} avaliações")
+    kpi5.metric(
+        "CSAT Positivo ⭐", 
+        f"{csat_metrics['positive_percentage']}%", 
+        help=f"Baseado em {csat_metrics['count']} avaliações (porcentagem de notas 4 e 5)"
+    )
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.subheader("⏱️ Tempos Médios de Atendimento")
@@ -382,9 +386,9 @@ def render_ai_page(dates, selected_projects):
         help="Clientes que conversaram com a IA mais de uma vez no período selecionado."
     )
     m3.metric(
-        "Média CSAT (IA)", 
-        f"{ai_csat_metrics['avg']} ⭐", 
-        help=f"Baseado em {ai_csat_metrics['count']} avaliações."
+        "CSAT Positivo ⭐", 
+        f"{ai_csat_metrics['positive_percentage']}%", 
+        help=f"Baseado em {ai_csat_metrics['count']} avaliações (porcentagem de notas 4 e 5)."
     )
 
     st.divider()
