@@ -139,8 +139,8 @@ def render_sac_page(dates, selected_projects):
 
     kpi5.metric(
         "CSAT Positivo ⭐", 
-        f"{csat_metrics['positive_percentage']}%", 
-        help=f"Baseado em {csat_metrics['count']} avaliações (porcentagem de notas 4 e 5)"
+        f"{csat_metrics.get('positive_percentage', 0.0)}%", 
+        help=f"Baseado em {csat_metrics.get('count', 0)} avaliações (porcentagem de notas 4 e 5)"
     )
 
     st.markdown("<br>", unsafe_allow_html=True)
@@ -387,8 +387,8 @@ def render_ai_page(dates, selected_projects):
     )
     m3.metric(
         "CSAT Positivo ⭐", 
-        f"{ai_csat_metrics['positive_percentage']}%", 
-        help=f"Baseado em {ai_csat_metrics['count']} avaliações (porcentagem de notas 4 e 5)."
+        f"{ai_csat_metrics.get('positive_percentage', 0.0)}%",
+        help=f"Baseado em {ai_csat_metrics.get('count', 0)} avaliações (porcentagem de notas 4 e 5)."
     )
 
     st.divider()
