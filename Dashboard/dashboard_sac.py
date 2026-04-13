@@ -128,13 +128,18 @@ def render_sac_page(dates, selected_projects):
     kpi2.metric("Atendimentos Únicos", sac_metrics["single_contact"], help="Clientes que entraram em contato apenas uma vez.")
     
     # Clientes que geraram mais de um chamado
-    kpi3.metric("Clientes Reincidentes", sac_metrics["recurrent_clients"], delta_color="inverse", help="Quantidade de URNs distintos que possuem 2 ou mais chamados no período.")
-    
-    # Métrica de FCR (Porcentagem de chamados não reincidentes sobre o total)
+    kpi3.metric(
+        "Clientes Reincidentes", 
+        sac_metrics["recurrent_clients"], 
+        delta_color="inverse", 
+        help=f"Quantidade de URNs distintos que possuem 2 ou mais chamados. Representa {sac_metrics['recurrent_clients_rate']}% do total de chamados abertos no período."
+    )
+
+    # Métrica de FCR
     kpi4.metric(
-        label="Taxa de FCR", 
-        value=f"{sac_metrics['fcr_rate']}%",
-        help="Razão entre chamados de contatos únicos e o total de atendimentos abertos no período."
+        label="Chamados FCR", 
+        value=sac_metrics['fcr_calls'],
+        help=f"Taxa de FCR: {sac_metrics['fcr_rate']}% do total de chamados. (Calculado pela subtração dos chamados reincidentes por assunto)"
     )
 
     kpi5.metric(
