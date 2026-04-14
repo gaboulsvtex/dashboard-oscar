@@ -151,19 +151,17 @@ def fetch_cached_csat_data(token, flow_uuid, start_date, end_date):
     }
     base_url = "https://flows.weni.ai/api/v2/runs.json"
     all_evaluations = []
-    
-    # Inclusão do parâmetro 'flow' conforme a documentação da API
+    next_day = end_date + datetime.timedelta(days=1)
     params = {
         "flow": flow_uuid,
         "after": start_date.strftime("%Y-%m-%d"),
-        "before": end_date.strftime("%Y-%m-%d"),
+        "before": next_day.strftime("%Y-%m-%d"),
         "responded": "true"
     }
     
     next_url = base_url
     try:
         while next_url:
-            # Se for a próxima página (next_url), os params já vêm embutidos na URL retornada pela API
             response = requests.get(
                 next_url, 
                 headers=headers, 
@@ -175,17 +173,29 @@ def fetch_cached_csat_data(token, flow_uuid, start_date, end_date):
             
             for run in data.get("results", []):
                 values = run.get("values", {})
+                run_data = {}
+                
+                # Extrai avaliação (CSAT)
                 if "avaliacao" in values:
                     val = values["avaliacao"].get("value")
-                    # Filtra apenas avaliações válidas (1 a 5)
                     if val in ["1", "2", "3", "4", "5"]:
-                        all_evaluations.append(int(val))
+                        run_data["avaliacao"] = int(val)
+                
+                # Extrai Resolução
+                if "resolvido" in values:
+                    res_val = values["resolvido"].get("value")
+                    if res_val in ["Sim", "Não"]:
+                        run_data["resolvido"] = res_val
+                
+                # Se encontrou algum dos dois, adiciona à lista
+                if run_data:
+                    all_evaluations.append(run_data)
             
             next_url = data.get("next")
             
         return all_evaluations
     except Exception as e:
-        st.error(f"Erro ao buscar CSAT (Flow {flow_uuid}): {e}")
+        st.error(f"Erro ao buscar avaliações (Flow {flow_uuid}): {e}")
         return []
 
 

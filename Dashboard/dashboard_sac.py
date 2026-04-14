@@ -105,21 +105,32 @@ def render_sac_page(dates, selected_projects):
     metrics = calculate_sac_metrics(df_filtered)
 
     # --- FLOWS ---
-    consolidated_csat = []
+    consolidated_evals = []
 
     for p_name in selected_projects:
         config = PROJECT_CONFIGS[p_name]
         flow_client = WeniFlowsClient(config["flows_token"], config["flow_uuid"])
-        consolidated_csat.extend(flow_client.fetch_csat_data(dates[0], dates[1]))
+        consolidated_evals.extend(flow_client.fetch_csat_data(dates[0], dates[1]))
 
-    csat_metrics = calculate_csat_metrics(consolidated_csat)
+    csat_scores = [e["avaliacao"] for e in consolidated_evals if "avaliacao" in e]
+    resolucao_scores = [e["resolvido"] for e in consolidated_evals if "resolvido" in e]
+
+    csat_metrics = calculate_csat_metrics(csat_scores)
+    
     setores = [PROJECT_CONFIGS[p]["sac_sector"] for p in selected_projects]
     df_filtered = df_raw[df_raw['sector.name'].str.contains('|'.join(setores), case=False, na=False)]
     sac_metrics = calculate_sac_metrics(df_filtered)
 
+    # --- CÁLCULO DE TAXA DE RESOLUÇÃO ---
+    total_resolvido = len(resolucao_scores)
+    sim_count = resolucao_scores.count("Sim")
+    taxa_resolucao = (sim_count / total_resolvido * 100) if total_resolvido > 0 else 0.0
+    total_calls = sac_metrics["total_calls"]
+    taxa_participacao = (total_resolvido / total_calls * 100) if total_calls > 0 else 0.0
+
     # KPIs Principais
     st.subheader("🚀 Indicadores de Performance")
-    kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
+    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
     
     # Métrica alterada conforme solicitado
     kpi1.metric("Total de Atendimentos ENCERRADOS", sac_metrics["total_calls"])
@@ -142,10 +153,28 @@ def render_sac_page(dates, selected_projects):
         help=f"Taxa de FCR: {sac_metrics['fcr_rate']}% do total de chamados. (Calculado pela subtração dos chamados reincidentes por assunto)"
     )
 
-    kpi5.metric(
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    st.subheader("⭐ Avaliações")
+    av1, av2, av3 = st.columns(3)
+
+    av1.metric(
         "CSAT Positivo ⭐", 
-        f"{csat_metrics.get('positive_percentage', 0.0)}%", 
-        help=f"Baseado em {csat_metrics.get('count', 0)} avaliações (porcentagem de notas 4 e 5)"
+        f"{csat_metrics['positive_percentage']}%", 
+        help=f"Baseado em {csat_metrics['count']} avaliações (porcentagem de notas 4 e 5)"
+    )
+    
+    av2.metric(
+        "Taxa de Resolução 🎯",
+        f"{taxa_resolucao:.1f}%",
+        help=f"Baseado em {total_resolvido} respostas (proporção de respostas 'Sim')"
+    )
+    
+    av3.metric(
+        "Participação 📊",
+        f"{taxa_participacao:.1f}%",
+        help=f"Baseado em {total_resolvido} respostas sobre um total de {total_calls} atendimentos encerrados."
     )
 
     st.markdown("<br>", unsafe_allow_html=True)
