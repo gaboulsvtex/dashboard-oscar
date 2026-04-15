@@ -44,6 +44,20 @@ PROJECT_CONFIGS = {
     }
 }
 
+TAGS_PARA_EXCLUIR = [
+    "INATIVIDADE", "Produto Indisponivel", "Venda Concluída", "Venda Perdida", 
+    "None", "TRANSBORDO / PERDIDO", "Vendas / 3.0", "SAC / FESTCARD", 
+    "SAC / CREDSYSTEM", "Pagamento Não Aprovado", "Cartão PL / Fatura", 
+    "Problema Técnico Site", "Inatividade", "Valor Divergente", "Antifraude", 
+    "3P Marketplace / Aguardando Seller", "Produto Match 3P", "NÃO RESOLVIDO", 
+    "RESOLVIDO", "Status Pedido - Erro interno", "DIADORA", "SAC/ CREDSYSTEM", 
+    "teste", "Comunicação interna", "DESCONSIDERAR", "Duplicidade", "RH - VAGAS", 
+    "Status do Pedido / Erro interno", "Cartão PL/ Fatura", "Vendas - Perdida", 
+    "Jurídico", "Spam", "Trabalhe conosco", "SAC Fest", "Parcerias e patrocínios", 
+    "SAC Cred", "PARCERIA/PATROCÍNIO", "AGRADECIMENTO", "Sac - Fatura", 
+    "Vendas - Lojas 3.0"
+]
+
 def main():
 
     # --- SIDEBAR COMUM ---
@@ -71,6 +85,22 @@ def main():
             default=list(PROJECT_CONFIGS.keys())
         )
 
+        exclude_tags = False
+        if page == "Atendimento Humano (SAC)":
+            st.divider()
+            st.header("🏷️ Filtros de TAGs")
+            tags_list_md = "\n".join([f"- {tag}" for tag in TAGS_PARA_EXCLUIR])
+            help_tooltip = (
+                "Remove das métricas e avaliações todos os chamados que contenham "
+                "qualquer uma destas tags operacionais ou de inatividade:\n\n"
+                f"{tags_list_md}"
+            )
+            exclude_tags = st.checkbox(
+                "Desconsiderar Chamados Inválidos/Inativos", 
+                value=False,
+                help=help_tooltip
+            )
+
     if not projetos_selecionados:
         st.warning("Selecione pelo menos um projeto no menu lateral.")
         return
@@ -78,7 +108,8 @@ def main():
     if page == "Atendimento Humano (SAC)":
         render_sac_page(
             range_date,
-            projetos_selecionados
+            projetos_selecionados,
+            exclude_tags
         )
     else:
         render_ai_page(
@@ -86,7 +117,7 @@ def main():
             projetos_selecionados
         )
 
-def render_sac_page(dates, selected_projects): 
+def render_sac_page(dates, selected_projects, exclude_tags): 
     st.title("📊 Dashboard SAC - Atendimento Humano")
 
     # --- CHATS ENGINE ---
@@ -97,20 +128,70 @@ def render_sac_page(dates, selected_projects):
         st.warning("Nenhum dado encontrado para o período selecionado.")
         return
 
+    # --- FLOWS ---
+    consolidated_evals = []
+    for p_name in selected_projects:
+        config = PROJECT_CONFIGS[p_name]
+        flow_client = WeniFlowsClient(config["flows_token"], config["flow_uuid"])
+        consolidated_evals.extend(flow_client.fetch_csat_data(dates[0], dates[1]))
+    
+
+    # LÓGICA DE CORRELAÇÃO E EXCLUSÃO DE TAGS
+    if exclude_tags and not df_raw.empty:
+        # Prepara set de validação ignorando Case Sensitive e espaços em branco
+        forbidden_tags_lower = set(str(t).lower().strip() for t in TAGS_PARA_EXCLUIR)
+        
+        def has_forbidden_tag(tag_list):
+            if isinstance(tag_list, list):
+                return any(str(tag).lower().strip() in forbidden_tags_lower for tag in tag_list)
+            return False
+
+        # Marca quais linhas (chamados) do SAC têm a tag proibida
+        df_raw['has_forbidden_tag'] = df_raw['tag_list'].apply(has_forbidden_tag)
+        
+        if len(consolidated_evals) > 0:
+            df_evals = pd.DataFrame(consolidated_evals)
+            
+            if 'created_on' in df_evals.columns and 'urn' in df_evals.columns:
+                # 1. ORDENA df_raw (Rooms) cronologicamente para parear múltiplas ocorrências
+                df_raw_sorted = df_raw.copy()
+                df_raw_sorted['urn'] = df_raw_sorted['urn'].fillna('anonymous')
+                df_raw_sorted['sort_date'] = pd.to_datetime(df_raw_sorted['ended_at'].fillna(df_raw_sorted['created_on']), utc=True)
+                df_raw_sorted = df_raw_sorted.sort_values('sort_date')
+                df_raw_sorted['urn_rank'] = df_raw_sorted.groupby('urn').cumcount()
+                
+                # 2. ORDENA df_evals (Runs/CSAT) cronologicamente para parear múltiplas ocorrências
+                df_evals['urn'] = df_evals['urn'].fillna('anonymous')
+                df_evals['sort_date'] = pd.to_datetime(df_evals['created_on'], utc=True)
+                df_evals = df_evals.sort_values('sort_date')
+                df_evals['urn_rank'] = df_evals.groupby('urn').cumcount()
+                
+                # 3. Faz o cruzamento para descobrir a flag "has_forbidden_tag" dos fluxos associados
+                df_evals_merged = pd.merge(
+                    df_evals,
+                    df_raw_sorted[['urn', 'urn_rank', 'has_forbidden_tag']],
+                    on=['urn', 'urn_rank'],
+                    how='left'
+                )
+                
+                # Filtra removendo CSATs que estão ligados a tickets com tags proibidas
+                df_evals_filtered = df_evals_merged[df_evals_merged['has_forbidden_tag'] != True]
+                consolidated_evals = df_evals_filtered.to_dict('records')
+
+        # Por fim, limpa o próprio dataframe do SAC
+        df_raw = df_raw[~df_raw['has_forbidden_tag']].copy()
+
     # Filtro dinâmico: une os nomes de setores dos projetos selecionados
     setores = [PROJECT_CONFIGS[p]["sac_sector"] for p in selected_projects]
     # Filtra o DataFrame se o setor contiver qualquer uma das strings na lista
     df_filtered = df_raw[df_raw['sector.name'].str.contains('|'.join(setores), case=False, na=False)]
 
+    if df_filtered.empty:
+        st.warning("Após os filtros aplicados, nenhum dado restou para exibição.")
+        return
+
     metrics = calculate_sac_metrics(df_filtered)
 
-    # --- FLOWS ---
-    consolidated_evals = []
-
-    for p_name in selected_projects:
-        config = PROJECT_CONFIGS[p_name]
-        flow_client = WeniFlowsClient(config["flows_token"], config["flow_uuid"])
-        consolidated_evals.extend(flow_client.fetch_csat_data(dates[0], dates[1]))
 
     csat_scores = [e["avaliacao"] for e in consolidated_evals if "avaliacao" in e]
     resolucao_scores = [e["resolvido"] for e in consolidated_evals if "resolvido" in e]

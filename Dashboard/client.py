@@ -187,8 +187,10 @@ def fetch_cached_csat_data(token, flow_uuid, start_date, end_date):
                     if res_val in ["Sim", "Não"]:
                         run_data["resolvido"] = res_val
                 
-                # Se encontrou algum dos dois, adiciona à lista
+                # NOVA LÓGICA: Se encontrou algum dos dois, pega URN e Data para o cruzamento
                 if run_data:
+                    run_data["urn"] = run.get("contact", {}).get("urn")
+                    run_data["created_on"] = run.get("created_on")
                     all_evaluations.append(run_data)
             
             next_url = data.get("next")
