@@ -46,7 +46,7 @@ PROJECT_CONFIGS = {
 
 TAGS_PARA_EXCLUIR = [
     "INATIVIDADE", "Produto Indisponivel", "Venda Concluída", "Venda Perdida", 
-    "None", "TRANSBORDO / PERDIDO", "Vendas / 3.0", "SAC / FESTCARD", 
+    "None", "TRANSBORDO / PERDIDO", "SAC / FESTCARD", 
     "SAC / CREDSYSTEM", "Pagamento Não Aprovado", "Cartão PL / Fatura", 
     "Problema Técnico Site", "Inatividade", "Valor Divergente", "Antifraude", 
     "3P Marketplace / Aguardando Seller", "Produto Match 3P", "NÃO RESOLVIDO", 
@@ -54,8 +54,12 @@ TAGS_PARA_EXCLUIR = [
     "teste", "Comunicação interna", "DESCONSIDERAR", "Duplicidade", "RH - VAGAS", 
     "Status do Pedido / Erro interno", "Cartão PL/ Fatura", "Vendas - Perdida", 
     "Jurídico", "Spam", "Trabalhe conosco", "SAC Fest", "Parcerias e patrocínios", 
-    "SAC Cred", "PARCERIA/PATROCÍNIO", "AGRADECIMENTO", "Sac - Fatura", 
-    "Vendas - Lojas 3.0"
+    "SAC Cred", "PARCERIA/PATROCÍNIO", "AGRADECIMENTO", "Sac - Fatura"
+]
+
+EMAILS_PARA_EXCLUIR = [
+    "isabela.constantino@guroodigital.com.br",
+    "luiz.perez@grupooscar.com.br"
 ]
 
 def main():
@@ -92,7 +96,8 @@ def main():
             tags_list_md = "\n".join([f"- {tag}" for tag in TAGS_PARA_EXCLUIR])
             help_tooltip = (
                 "Remove das métricas e avaliações todos os chamados que contenham "
-                "qualquer uma destas tags operacionais ou de inatividade:\n\n"
+                "qualquer uma destas tags, bem como os chamados "
+                "atentidos por isabela.constantino e luiz.perez).\n\n"
                 f"{tags_list_md}"
             )
             exclude_tags = st.checkbox(
@@ -140,14 +145,24 @@ def render_sac_page(dates, selected_projects, exclude_tags):
     if exclude_tags and not df_raw.empty:
         # Prepara set de validação ignorando Case Sensitive e espaços em branco
         forbidden_tags_lower = set(str(t).lower().strip() for t in TAGS_PARA_EXCLUIR)
+        forbidden_emails = set(str(e).lower().strip() for e in EMAILS_PARA_EXCLUIR)
         
         def has_forbidden_tag(tag_list):
             if isinstance(tag_list, list):
                 return any(str(tag).lower().strip() in forbidden_tags_lower for tag in tag_list)
             return False
 
-        # Marca quais linhas (chamados) do SAC têm a tag proibida
+        # 1. Marca quais linhas (chamados) do SAC têm a tag proibida
         df_raw['has_forbidden_tag'] = df_raw['tag_list'].apply(has_forbidden_tag)
+
+        # 2. Marca quais linhas (chamados) pertencem aos emails proibidos
+        if 'user.email' in df_raw.columns:
+            df_raw['has_forbidden_email'] = df_raw['user.email'].astype(str).str.lower().str.strip().isin(forbidden_emails)
+        else:
+            df_raw['has_forbidden_email'] = False
+
+        # 3. Flag consolidada de Exclusão (basta cair em uma das regras para ser inválido)
+        df_raw['is_invalid'] = df_raw['has_forbidden_tag'] | df_raw['has_forbidden_email']
         
         if len(consolidated_evals) > 0:
             df_evals = pd.DataFrame(consolidated_evals)
@@ -166,20 +181,20 @@ def render_sac_page(dates, selected_projects, exclude_tags):
                 df_evals = df_evals.sort_values('sort_date')
                 df_evals['urn_rank'] = df_evals.groupby('urn').cumcount()
                 
-                # 3. Faz o cruzamento para descobrir a flag "has_forbidden_tag" dos fluxos associados
+                # 3. Faz o cruzamento para descobrir a flag "is_invalid" dos fluxos associados
                 df_evals_merged = pd.merge(
                     df_evals,
-                    df_raw_sorted[['urn', 'urn_rank', 'has_forbidden_tag']],
+                    df_raw_sorted[['urn', 'urn_rank', 'is_invalid']],
                     on=['urn', 'urn_rank'],
                     how='left'
                 )
                 
                 # Filtra removendo CSATs que estão ligados a tickets com tags proibidas
-                df_evals_filtered = df_evals_merged[df_evals_merged['has_forbidden_tag'] != True]
+                df_evals_filtered = df_evals_merged[df_evals_merged['is_invalid'] != True]
                 consolidated_evals = df_evals_filtered.to_dict('records')
 
         # Por fim, limpa o próprio dataframe do SAC
-        df_raw = df_raw[~df_raw['has_forbidden_tag']].copy()
+        df_raw = df_raw[~df_raw['is_invalid']].copy()
 
     # Filtro dinâmico: une os nomes de setores dos projetos selecionados
     setores = [PROJECT_CONFIGS[p]["sac_sector"] for p in selected_projects]
