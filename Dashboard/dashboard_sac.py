@@ -6,8 +6,8 @@ import concurrent.futures
 import threading
 import time
 from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
-from client import WeniChatsEngineClient, WeniSupervisorClient, WeniFlowsClient, WeniEventsClient
-from utils import calculate_sac_metrics, calculate_csat_metrics
+from client import WeniChatsEngineClient, WeniSupervisorClient, WeniFlowsClient, WeniEventsClient, fetch_cached_finished_rooms_status
+from utils import calculate_sac_metrics, calculate_csat_metrics, format_seconds
 
 # --- CONFIGURAÇÃO VISUAL ---
 st.set_page_config(page_title="Oscar Calçados | Analytics", layout="wide")
@@ -23,6 +23,7 @@ st.markdown("""
 PROJECT_CONFIGS = {
     "Oscar Calçados": {
         "sac_sector": "Oscar Calçados",
+        "sector_uuid": "9a64e4a0-70c3-4bf2-b0d8-5e7ca7fc4b6a",
         "project_uuid": "9a69cb5f-af0e-4a59-b53c-66c814d56fe7",
         "conv_key": st.secrets["OSCAR_CALCADOS"]["CONVERSATIONS_KEY"],
         "flows_token": st.secrets["OSCAR_CALCADOS"]["FLOWS_TOKEN"],
@@ -30,6 +31,7 @@ PROJECT_CONFIGS = {
     },
     "Paquetá Esportes": {
         "sac_sector": "Paquetá Esportes",
+        "sector_uuid": "b27ba40e-5c64-404a-959d-c7c5582a71c7",
         "project_uuid": "95c89c57-7591-46bc-9845-add5f98e5488",
         "conv_key": st.secrets["PAQUETA_ESPORTES"]["CONVERSATIONS_KEY"],
         "flows_token": st.secrets["PAQUETA_ESPORTES"]["FLOWS_TOKEN"],
@@ -37,6 +39,7 @@ PROJECT_CONFIGS = {
     },
     "Paquetá Calçados": {
         "sac_sector": "paquetá",
+        "sector_uuid": "39f8e02e-ee4f-4d25-b871-6ee2b0cfeaea",
         "project_uuid": "953c5de8-3055-411a-ab7d-5f41906bfe2b",
         "conv_key": st.secrets["PAQUETA_CALCADOS"]["CONVERSATIONS_KEY"],
         "flows_token": st.secrets["PAQUETA_CALCADOS"]["FLOWS_TOKEN"],
@@ -217,6 +220,36 @@ def render_sac_page(dates, selected_projects, exclude_tags):
     df_filtered = df_raw[df_raw['sector.name'].str.contains('|'.join(setores), case=False, na=False)]
     sac_metrics = calculate_sac_metrics(df_filtered)
 
+    # --- CÁLCULO DE TEMPOS DAS SALAS ENCERRADAS ---
+    DASHBOARD_CENTRAL_UUID = "8183c8e6-0c0c-42dc-a8d6-7eb7ae256405"
+    TOKEN_CENTRAL = st.secrets["TOKENS"]["CHATS_ENGINE_TOKEN"]
+
+    # 1. Agrupar UUIDs de todos os setores selecionados
+    sector_uuids = []
+    for p_name in selected_projects:
+        config = PROJECT_CONFIGS[p_name]
+        sector_uuids.append(config.get("sector_uuid", config["sac_sector"]))
+    
+    sector_filter = ",".join(sector_uuids)
+
+    # 2. Fazer UMA ÚNICA chamada à API para todos os setores escolhidos
+    status_data = fetch_cached_finished_rooms_status(
+        project_uuid=DASHBOARD_CENTRAL_UUID, 
+        token=TOKEN_CENTRAL,
+        start_date=dates[0], 
+        end_date=dates[1],
+        sector=sector_filter
+    )
+
+    # 3. Formatar os tempos retornados
+    if status_data:
+        avg_waiting = format_seconds(status_data.get("average_waiting_time", 0))
+        avg_first_response = format_seconds(status_data.get("average_first_response_time", 0))
+        avg_message_response = format_seconds(status_data.get("average_response_time", 0))
+        avg_interaction = format_seconds(status_data.get("average_conversation_duration", 0))
+    else:
+        avg_waiting = avg_first_response = avg_message_response = avg_interaction = "0m 0s"
+
     # --- CÁLCULO DE TAXA DE RESOLUÇÃO ---
     total_resolvido = len(resolucao_scores)
     sim_count = resolucao_scores.count("Sim")
@@ -257,22 +290,22 @@ def render_sac_page(dates, selected_projects, exclude_tags):
     t1, t2, t3, t4 = st.columns(4)
     t1.metric(
         "Tempo Médio em Espera", 
-        sac_metrics["avg_waiting_time"], 
+        avg_waiting, 
         help="Média do tempo que o contato aguardou até ser atribuído a um atendente humano."
     )
     t2.metric(
         "Tempo p/ 1ª Resposta", 
-        sac_metrics["avg_first_response_time"], 
+        avg_first_response, 
         help="Média do tempo até a primeira interação do agente humano."
     )
     t3.metric(
         "Tempo Médio de Resposta", 
-        sac_metrics["avg_message_response_time"], 
+        avg_message_response, 
         help="Média de tempo geral entre uma mensagem do cliente e a resposta do agente."
     )
     t4.metric(
         "Duração da Conversa", 
-        sac_metrics["avg_interaction_time"], 
+        avg_interaction, 
         help="Tempo total médio de duração da sala desde a abertura até o encerramento."
     )
 
