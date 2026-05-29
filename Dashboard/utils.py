@@ -97,7 +97,7 @@ def calculate_sac_metrics(df: pd.DataFrame):
     for col in time_columns:
         if col in df.columns:
             numeric_series = pd.to_numeric(df[col], errors='coerce').fillna(0)
-            avg_val = numeric_series[numeric_series > 0].mean()
+            avg_val = numeric_series.mean()
             if pd.isna(avg_val):
                 avg_val = 0
             time_metrics[f"avg_{col}"] = format_seconds(avg_val)
