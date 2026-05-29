@@ -43,25 +43,43 @@ def calculate_sac_metrics(df: pd.DataFrame):
             "fcr_rate": 0.0,
             "top_tags": pd.DataFrame(),
             "reincidence_table": pd.DataFrame(),
-            "order_reincidence": pd.DataFrame()
+            "order_reincidence": pd.DataFrame(),
+            "avg_waiting_time": "0m 0s",
+            "avg_first_response_time": "0m 0s",
+            "avg_message_response_time": "0m 0s",
+            "avg_interaction_time": "0m 0s"
         }
 
+    # Total de chamados (cada linha na API v2 é um atendimento humano)
     total_calls = len(df)
+    
+    # Estatísticas por URN (Identificador do contato)
     urn_stats = df['urn'].value_counts()
     single_contacts = urn_stats[urn_stats == 1].count()
+    
+    # Processamento de tags
     tags_df = df.explode('tag_list')
     
+    # Tabela de reincidência por assunto
     group_cols = ['urn', 'tag_list', 'sector_name'] if 'sector_name' in tags_df.columns else ['urn', 'tag_list']
     tag_reincidence = tags_df.groupby(group_cols).size().reset_index(name='qtd_salas')
     tag_reincidence = tag_reincidence[tag_reincidence['qtd_salas'] > 1].sort_values(by='qtd_salas', ascending=False)
 
+    # --- CÁLCULO DE FCR ---
+    # Soma a quantidade total de chamados que aparecem na tabela de reincidência por assunto
     total_reincident_by_subject = int(tag_reincidence['qtd_salas'].sum())
+    
+    # Chamados FCR = Total de Chamados - Reincidentes por Assunto
     fcr_calls = max(0, total_calls - total_reincident_by_subject) 
+    
+    # Porcentagem da Taxa FCR
     fcr_rate = (fcr_calls / total_calls * 100) if total_calls > 0 else 0.0
     
+    # --- CÁLCULO DE CLIENTES REINCIDENTES ---
     recurrent_clients_count = urn_stats[urn_stats > 1].count()
     recurrent_clients_rate = (recurrent_clients_count / total_calls * 100) if total_calls > 0 else 0.0
 
+    # ----- Reincidencia por Pedido ----
     df['order_id'] = df['protocol'].apply(extract_order_id)
     df_orders = df[df['order_id'].notna()].copy()
     order_reincidence = df_orders.groupby('order_id').agg({
@@ -72,6 +90,20 @@ def calculate_sac_metrics(df: pd.DataFrame):
     order_reincidence.columns = ['ID do Pedido', 'Protocolos Relacionados','Setor', 'Qtd Tickets']
     order_reincidence = order_reincidence[order_reincidence['Qtd Tickets'] > 1].sort_values(by='Qtd Tickets', ascending=False)
 
+    # --- CÁLCULO DE TEMPOS MÉDIOS ---
+    time_columns = ['waiting_time', 'first_response_time', 'message_response_time', 'interaction_time']
+    time_metrics = {}
+    
+    for col in time_columns:
+        if col in df.columns:
+            numeric_series = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            avg_val = numeric_series[numeric_series > 0].mean()
+            if pd.isna(avg_val):
+                avg_val = 0
+            time_metrics[f"avg_{col}"] = format_seconds(avg_val)
+        else:
+            time_metrics[f"avg_{col}"] = "0m 0s"
+
     return {
         "total_calls": total_calls,
         "single_contact": single_contacts,
@@ -81,7 +113,11 @@ def calculate_sac_metrics(df: pd.DataFrame):
         "fcr_rate": round(fcr_rate, 2),
         "top_tags": tags_df['tag_list'].value_counts().reset_index(name='Frequência'),
         "reincidence_table": tag_reincidence,
-        "order_reincidence": order_reincidence
+        "order_reincidence": order_reincidence,
+        "avg_waiting_time": time_metrics["avg_waiting_time"],
+        "avg_first_response_time": time_metrics["avg_first_response_time"],
+        "avg_message_response_time": time_metrics["avg_message_response_time"],
+        "avg_interaction_time": time_metrics["avg_interaction_time"]
     }
 
 def calculate_csat_metrics(evaluations_list):
@@ -138,3 +174,4 @@ def calculate_csat_metrics(evaluations_list):
         "count": total,
         "dist": dist
     }
+

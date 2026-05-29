@@ -269,33 +269,3 @@ def fetch_cached_csat_events(token, start_date, end_date):
     except Exception as e:
         st.error(f"Erro ao buscar eventos CSAT (IA): {e}")
         return []
-
-@st.cache_data(ttl=600, show_spinner=False)
-def fetch_cached_finished_rooms_status(project_uuid, token, start_date, end_date, sector=None):
-    base_url = f"https://chats-engine.weni.ai/v1/external/dashboard/{project_uuid}/finished_rooms_status/"
-    
-    # Garante que o token tem o prefixo "Bearer " exigido pela documentação v1/external
-    clean_token = token.strip()
-    if not clean_token.startswith("Bearer "):
-        clean_token = f"Bearer {clean_token}"
-
-    headers = {
-        "Authorization": clean_token,
-        "Accept": "application/json"
-    }
-    params = {
-        "start_date": start_date.strftime("%Y-%m-%d"),
-        "end_date": end_date.strftime("%Y-%m-%d")
-    }
-    
-    if sector:
-        params["sector"] = sector
-    
-    try:
-        response = requests.get(base_url, headers=headers, params=params, timeout=30)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        import streamlit as st
-        st.error(f"Erro ao buscar tempos médios unificados: {e}")
-        return None
