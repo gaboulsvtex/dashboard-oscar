@@ -92,45 +92,53 @@ class WeniSupervisorClient:
 # a criar um cache separado para CADA project_uuid e data.
 @st.cache_data(ttl=600)
 def fetch_cached_ai_conversations(project_uuid, api_key, start_date, end_date):
-    base_url = f"https://nexus.weni.ai/api/public/{project_uuid}/supervisor/conversations"
+    base_url = f"https://nexus.weni.ai/api/public/v2/{project_uuid}/supervisor/conversations"
     headers = {"Authorization": f"ApiKey {api_key.strip()}", "Accept": "application/json"}
     
     all_results = []
     total_status_summary = {}
-    current_page = 1
+    total_count = 0
+    
+    # Prepara os parâmetros para a primeira chamada
+    params = {
+        "start": start_date.strftime("%Y-%m-%dT00:00:00-03:00"),
+        "end": end_date.strftime("%Y-%m-%dT23:59:59-03:00"),
+        "page_size": 100
+    }
+    
+    next_url = base_url
     
     try:
-        while True:
-            params = {
-                "start": start_date.strftime("%Y-%m-%d"),
-                "end": end_date.strftime("%Y-%m-%d"),
-                "page": current_page,
-                "page_size": 100
-            }
-            
-            response = requests.get(base_url, headers=headers, params=params, timeout=30)
+        while next_url:
+            # Na primeira iteração usa o dictionary `params`. 
+            # Nas iterações subsequentes (onde next_url possui ?cursor=...), passamos params=None
+            response = requests.get(
+                next_url, 
+                headers=headers, 
+                params=params if next_url == base_url else None, 
+                timeout=30
+            )
             response.raise_for_status()
             data = response.json()
             
             results = data.get("results", [])
             all_results.extend(results)
             
-            if current_page == 1:
+            # Coleta o resumo de status e count total apenas da primeira página
+            if next_url == base_url:
                 total_status_summary = data.get("status_summary", {})
+                total_count = data.get("count", 0)
             
-            # Se atingiu o limite ou a página veio vazia, interrompe a paginação
-            if len(all_results) >= data.get("count", 0) or not results:
-                break
-                
-            current_page += 1
+            # A paginação ocorre verificando o campo "next" 
+            next_url = data.get("next")
 
         return {
             "status_summary": total_status_summary,
             "results": all_results,
-            "count": data.get("count", 0)
+            "count": total_count
         }
     except Exception as e:
-        st.error(f"Erro IA ({project_uuid}) na página {current_page}: {e}")
+        st.error(f"Erro IA ({project_uuid}): {e}")
         return None
 
 class WeniFlowsClient:
