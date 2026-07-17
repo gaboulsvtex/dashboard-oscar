@@ -194,7 +194,13 @@ def fetch_cached_csat_data(token, flow_uuid, start_date, end_date):
                     res_val = values["resolvido"].get("value")
                     if res_val in ["Sim", "Não"]:
                         run_data["resolvido"] = res_val
-                
+
+                # Extrai Comentário (sempre atrelado à mesma run da avaliação)
+                if "comentario" in values:
+                    com_val = values["comentario"].get("value")
+                    if com_val:
+                        run_data["comentario"] = com_val
+
                 # NOVA LÓGICA: Se encontrou algum dos dois, pega URN e Data para o cruzamento
                 if run_data:
                     run_data["urn"] = run.get("contact", {}).get("urn")

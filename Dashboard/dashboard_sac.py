@@ -138,8 +138,11 @@ def render_sac_page(dates, selected_projects, exclude_tags):
     for p_name in selected_projects:
         config = PROJECT_CONFIGS[p_name]
         flow_client = WeniFlowsClient(config["flows_token"], config["flow_uuid"])
-        consolidated_evals.extend(flow_client.fetch_csat_data(dates[0], dates[1]))
-    
+        evals = flow_client.fetch_csat_data(dates[0], dates[1])
+        for e in evals:
+            e["loja"] = p_name
+        consolidated_evals.extend(evals)
+
 
     # LÓGICA DE CORRELAÇÃO E EXCLUSÃO DE TAGS
     if exclude_tags and not df_raw.empty:
@@ -276,6 +279,18 @@ def render_sac_page(dates, selected_projects, exclude_tags):
         help="Tempo total médio de duração da sala desde a abertura até o encerramento."
     )
 
+    # --- TABELA DE COMENTÁRIOS ---
+    comments_data = [
+        {
+            "Cliente": e.get("urn"),
+            "Comentário": e.get("comentario"),
+            "Nota CSAT": e.get("avaliacao"),
+            "Loja": e.get("loja")
+        }
+        for e in consolidated_evals if e.get("comentario")
+    ]
+    comments_df = pd.DataFrame(comments_data, columns=["Cliente", "Comentário", "Nota CSAT", "Loja"])
+
     st.divider()
 
     col_left, col_right = st.columns([1, 1])
@@ -286,70 +301,11 @@ def render_sac_page(dates, selected_projects, exclude_tags):
         if not top_tags.empty:
             # Filtro de tags vazias para o gráfico
             top_tags = top_tags[top_tags['tag_list'] != ""]
-            fig = px.bar(top_tags.head(10), x='Frequência', y='tag_list', 
+            fig = px.bar(top_tags.head(10), x='Frequência', y='tag_list',
                          orientation='h', color='Frequência',
                          color_continuous_scale='Reds', template='plotly_white')
             fig.update_layout(yaxis={'categoryorder':'total ascending'}, showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
-
-        st.write("---")
-
-        st.subheader("⭐ Distribuição CSAT e Avaliações")
-        col_csat_chart, col_csat_cards = st.columns([2, 1])
-        with col_csat_chart:
-            if csat_metrics["count"] > 0:
-                # Criação do gráfico de barras horizontais
-                fig_csat = px.bar(
-                    csat_metrics["dist"], 
-                    x='Proporção', 
-                    y='Categoria', 
-                    orientation='h',
-                    text='Texto', # O texto criado no utils.py (Ex: 80.0% (4))
-                    color='Nota',
-                    color_continuous_scale="RdYlGn", # Escala de cor: Vermelho (1) ao Verde (5)
-                    range_color=[1, 5] # Fixa os extremos das cores
-                )
-                
-                # Ajustes visuais de layout do gráfico
-                fig_csat.update_layout(
-                    xaxis_title="Proporção das Avaliações (%)",
-                    yaxis_title="",
-                    showlegend=False,
-                    height=350,
-                    margin=dict(t=10, b=0, l=0, r=0), # Margens reduzidas para melhor encaixe
-                    xaxis=dict(range=[0, 115]) # Dá margem extra na direita para caber o texto longo
-                )
-                
-                # Posiciona o texto ao lado direito (fora) de cada barra
-                fig_csat.update_traces(
-                    textposition='outside',
-                    textfont_size=14,
-                    cliponaxis=False # Evita que textos muito longos sejam cortados na borda
-                )
-                
-                st.plotly_chart(fig_csat, use_container_width=True)
-            else:
-                st.info("Nenhuma avaliação CSAT encontrada no período filtrado.")
-
-        with col_csat_cards:
-            # Os cards empilhados verticalmente à direita do gráfico
-            st.metric(
-                "CSAT Positivo ⭐", 
-                f"{csat_metrics['positive_percentage']}%", 
-                help=f"Baseado em {csat_metrics['count']} avaliações (porcentagem de notas 4 e 5)"
-            )
-            
-            st.metric(
-                "Taxa de Resolução 🎯",
-                f"{taxa_resolucao:.1f}%",
-                help=f"Baseado em {total_resolvido} respostas (proporção de respostas 'Sim')"
-            )
-            
-            st.metric(
-                "Participação 📊",
-                f"{taxa_participacao:.1f}%",
-                help=f"Baseado em {total_resolvido} respostas sobre um total de {total_calls} atendimentos encerrados."
-            )
 
     with col_right:
         st.subheader("🔄 Reincidência por Assunto")
@@ -364,6 +320,85 @@ def render_sac_page(dates, selected_projects, exclude_tags):
             hide_index=True,
             use_container_width=True
         )
+
+    st.write("---")
+
+    col_csat, col_comments = st.columns([1, 1])
+
+    with col_csat:
+        st.subheader("⭐ Distribuição CSAT e Avaliações")
+        col_csat_chart, col_csat_cards = st.columns([2, 1])
+        with col_csat_chart:
+            if csat_metrics["count"] > 0:
+                # Criação do gráfico de barras horizontais
+                fig_csat = px.bar(
+                    csat_metrics["dist"],
+                    x='Proporção',
+                    y='Categoria',
+                    orientation='h',
+                    text='Texto', # O texto criado no utils.py (Ex: 80.0% (4))
+                    color='Nota',
+                    color_continuous_scale="RdYlGn", # Escala de cor: Vermelho (1) ao Verde (5)
+                    range_color=[1, 5] # Fixa os extremos das cores
+                )
+
+                # Ajustes visuais de layout do gráfico
+                fig_csat.update_layout(
+                    xaxis_title="Proporção das Avaliações (%)",
+                    yaxis_title="",
+                    showlegend=False,
+                    height=350,
+                    margin=dict(t=10, b=0, l=0, r=0), # Margens reduzidas para melhor encaixe
+                    xaxis=dict(range=[0, 115]) # Dá margem extra na direita para caber o texto longo
+                )
+
+                # Posiciona o texto ao lado direito (fora) de cada barra
+                fig_csat.update_traces(
+                    textposition='outside',
+                    textfont_size=14,
+                    cliponaxis=False # Evita que textos muito longos sejam cortados na borda
+                )
+
+                st.plotly_chart(fig_csat, use_container_width=True)
+            else:
+                st.info("Nenhuma avaliação CSAT encontrada no período filtrado.")
+
+        with col_csat_cards:
+            # Os cards empilhados verticalmente à direita do gráfico
+            st.metric(
+                "CSAT Positivo ⭐",
+                f"{csat_metrics['positive_percentage']}%",
+                help=f"Baseado em {csat_metrics['count']} avaliações (porcentagem de notas 4 e 5)"
+            )
+
+            st.metric(
+                "Taxa de Resolução 🎯",
+                f"{taxa_resolucao:.1f}%",
+                help=f"Baseado em {total_resolvido} respostas (proporção de respostas 'Sim')"
+            )
+
+            st.metric(
+                "Participação 📊",
+                f"{taxa_participacao:.1f}%",
+                help=f"Baseado em {total_resolvido} respostas sobre um total de {total_calls} atendimentos encerrados."
+            )
+
+    with col_comments:
+        st.subheader("💬 Comentários")
+        if not comments_df.empty:
+            st.dataframe(
+                comments_df,
+                column_config={
+                    "Cliente": "Cliente",
+                    "Comentário": st.column_config.TextColumn("Comentário", width="large"),
+                    "Nota CSAT": st.column_config.NumberColumn("Nota CSAT", format="%d ⭐"),
+                    "Loja": "Loja"
+                },
+                hide_index=True,
+                use_container_width=True
+            )
+        else:
+            st.info("Nenhum comentário encontrado no período filtrado.")
 
     st.divider()
     # --- NOVA SEÇÃO: REINCIDÊNCIA POR PEDIDO ---
